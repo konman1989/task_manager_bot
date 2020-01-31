@@ -1,7 +1,4 @@
-
-from telebot import TeleBot, types
-
-bot = TeleBot('926931469:AAH7VzaTMd-2wJ_AQClwyA9o42kXcC2r0Ck')
+from telebot import types
 
 
 def build_keyboard(*args, row_width=2):
@@ -22,6 +19,12 @@ def build_inline_keyboard(items, hidden_items, call_back_data):
         )
 
     return keyboard
+
+
+def check_command(commands: list, message: str) -> bool:
+    if message in commands:
+        return True
+
 
 
 

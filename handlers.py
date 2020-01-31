@@ -3,6 +3,12 @@ import requests
 
 def get_user_dashboards(chat_id):
     req = requests.get(
+        f'http://127.0.0.1:5000/users/{chat_id}/data?query=dashboards')
+    return req.json()
+
+
+def get_user_dashboards_as_admin(chat_id):
+    req = requests.get(
         f'http://127.0.0.1:5000/users/{chat_id}/dashboards')
     return req.json()
 
@@ -37,7 +43,6 @@ def delete_dashboard(chat_id, d_id):
 
 
 def update_dashboard(chat_id, d_id, d_name):
-
     req = requests.patch(
         f'http://127.0.0.1:5000/users/{chat_id}/dashboards/{d_id}',
         json={'dashboard_name': d_name})
@@ -72,3 +77,13 @@ def get_user_stats(chat_id, query_parameter):
     return req.json()
 
 
+def get_user_by_email(query_parameter):
+    req = requests.get(f'http://127.0.0.1:5000/users?email={query_parameter}')
+    return req.json()
+
+
+def add_user_to_dashboard(admin_id, user, d_board_id):
+    req = requests.post(
+        f'http://127.0.0.1:5000/users/{admin_id}/dashboards/{d_board_id}',
+        json={"team": user})
+    return req.status_code
