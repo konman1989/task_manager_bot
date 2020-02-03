@@ -87,3 +87,25 @@ def add_user_to_dashboard(admin_id, user, d_board_id):
         f'http://127.0.0.1:5000/users/{admin_id}/dashboards/{d_board_id}',
         json={"team": user})
     return req.status_code
+
+
+def add_user_to_task(initiator_id, user_id, dashboard_id, task_id):
+    req = requests.post(
+        f'http://127.0.0.1:5000/users/{initiator_id}/dashboards'
+        f'/{dashboard_id}/tasks/{task_id}', json={"team": user_id})
+    return req.status_code
+
+
+def post_comment(comment_data):
+    req = requests.post(
+        f'http://127.0.0.1:5000/users/{comment_data["chat_id"]}/dashboards'
+        f'/{comment_data["d_board_id"]}/tasks/{comment_data["task_id"]}/comments',
+        json={'title': comment_data['title'],
+              'text': comment_data['text']})
+    return req.status_code
+
+
+def get_user_comments(chat_id):
+    req = requests.get(
+        f'http://127.0.0.1:5000/users/{chat_id}/data?query=comments')
+    return req.json()

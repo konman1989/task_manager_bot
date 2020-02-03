@@ -13,9 +13,24 @@ from utils import build_keyboard, build_inline_keyboard, check_command
 bot = TeleBot('926931469:AAH7VzaTMd-2wJ_AQClwyA9o42kXcC2r0Ck')
 
 # TODO try/except clauses
-# TODO consider adding users to task upon creating task
+#
+#
+COMMANDS = ['Main Menu', 'Dashboards', 'My Tasks', 'My Comments',
+            '<< Back to Main Menu']
 
-COMMANDS = ['Main Menu', 'Dashboards', 'Tasks', 'Users', 'My Account']
+
+def command_checker(message):
+    """Check if user presses a menu button inside any next_step loop
+    and calls function the button corresponds to"""
+
+    commands = {'Main Menu': main_menu,
+                'Dashboards': get_dashboards,
+                'My Tasks': get_tasks,
+                'My Comments': get_user_comments,
+                '<< Back to Main Menu': main_menu
+                }
+
+    commands[message.text](message)
 
 
 @bot.message_handler(commands=['start', 'help'])
@@ -94,10 +109,13 @@ def get_dashboards(message):
     d_board_hidden = [d.get('id') for d in dashboards]
 
     keyboard = build_inline_keyboard(d_board, d_board_hidden,
-                                     'dashboard_detailed')
+                                     'dashboard_main/dashboard_detailed')
 
-    keyboard.add(types.InlineKeyboardButton('<< Back to Main Menu',
-                                            callback_data='main'))
+    keyboard.add(
+        types.InlineKeyboardButton('Create Dashboard',
+                                   callback_data='create_dashboard'),
+        types.InlineKeyboardButton('<< Back to Main Menu',
+                                   callback_data='main'))
     bot.send_message(message.chat.id, 'Getting your dashboards...',
                      reply_markup=build_keyboard('Create Dashboard',
                                                  'Create Task',
@@ -108,9 +126,8 @@ def get_dashboards(message):
 
 
 def update_dashboard(message, chat_id, d_id):
-    """Dashboard changes name even if delete dashboard was called after it!!!"""
-    if message.text == '<< Back to Main Menu':
-        main_menu(message)
+    if message.text in COMMANDS:
+        command_checker(message)
         return
     req = handlers.update_dashboard(chat_id, d_id, message.text)
     if req == 204:
@@ -157,6 +174,9 @@ def process_dashboard_name_step(message):
                          reply_markup=build_keyboard('Create Dashboard',
                                                      'Join Dashboard'))
         return
+    if message.text in COMMANDS:
+        command_checker(message)
+        return
 
     dashboard = {'dashboard_name': message.text}
     bot.send_message(
@@ -185,7 +205,82 @@ def create_dashboard(message, d):
                      f"{req.status_code}, message: {req.text}")
 
 
-@bot.message_handler(func=lambda x: x.text == 'Tasks')
+@bot.message_handler(func=lambda x: x.text == 'Add User to Dashboard')
+def initiate_adding_user(message):
+    dashboards = handlers.get_user_dashboards_as_admin(message.chat.id)
+    user_dashboards = [d.get('name') for d in dashboards]
+    msg = bot.send_message(message.chat.id,
+                           "OK. Send me the dashboard to add new user to:",
+                           reply_markup=build_keyboard(*user_dashboards,
+                                                       '<< Back to Main Menu'))
+
+    bot.register_next_step_handler(msg, locate_user_dashboard_step, dashboards)
+
+
+def locate_user_dashboard_step(message, dashboards):
+    if message.text in COMMANDS:
+        command_checker(message)
+        return
+    d_id = [d.get('id') for d in dashboards if
+            d.get('name') == message.text]
+    if not d_id:
+        msg = bot.send_message(message.chat.id,
+                               'Dashboard does not exist. Choose a dashboard '
+                               'from the list below:')
+        bot.register_next_step_handler(msg, locate_user_dashboard_step,
+                                       dashboards)
+        return
+    msg = bot.send_message(message.chat.id, "OK. Send me user's email:",
+                           reply_markup=build_keyboard('<< Back to Main Menu'))
+
+    bot.register_next_step_handler(msg, process_user_email_step, d_id[0])
+
+
+def process_user_email_step(message, dashboard):
+    if message.text in COMMANDS:
+        command_checker(message)
+        return
+    pattern = re.compile(r'^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$')
+    result = re.match(pattern, message.text)
+    if not result:
+        msg = bot.send_message(
+            message.chat.id,
+            'Email seems to be invalid. Please type email in format '
+            'name@domen.com, no spaces allowed.')
+        bot.register_next_step_handler(msg, process_user_email_step, dashboard)
+        return
+
+    email = message.text
+    bot.send_message(message.chat.id,
+                     'Thank you, checking if user is registered...')
+    user = handlers.get_user_by_email(email)
+    sleep(1.0)
+    if user == 'Not found':
+        msg = bot.send_message(
+            message.chat.id,
+            f"User with email {email} is not registered or email is wrong. "
+            f"Please try again:",
+            reply_markup=build_keyboard('<< Back to Main Menu'))
+        bot.register_next_step_handler(msg, process_user_email_step, dashboard)
+        return
+    bot.send_message(message.chat.id,
+                     'OK. User found. Adding user to dashboard...')
+    add_user_to_dashboard(message, user['chat_id'], dashboard)
+
+
+def add_user_to_dashboard(message, user_id, dashboard):
+    req = handlers.add_user_to_dashboard(message.chat.id, user_id, dashboard)
+    sleep(1.0)
+    if req == 201:
+        bot.send_message(message.chat.id, "User has been added.",
+                         reply_markup=build_keyboard('<< Back to Main Menu'))
+        main_menu(message)
+        return
+    bot.send_message(message.chat.id,
+                     f"Adding user failed with status code. Please try again")
+
+
+@bot.message_handler(func=lambda x: x.text == 'My Tasks')
 def get_tasks(message):
     """TODO add dashboard id to task_detailed"""
     tasks = handlers.get_user_stats(message.chat.id, 'tasks')
@@ -200,9 +295,9 @@ def get_tasks(message):
     keyboard.add(types.InlineKeyboardButton('<< Back to Main Menu',
                                             callback_data='main'))
     bot.send_message(message.chat.id, 'Getting your tasks...',
-                     reply_markup=build_keyboard('Create Dashboard',
-                                                 'Create Task',
+                     reply_markup=build_keyboard('Create Task',
                                                  'Add User to Task',
+                                                 'Post Comment',
                                                  'Main Menu', ))
     bot.send_message(message.chat.id, 'Your tasks:',
                      reply_markup=keyboard)
@@ -219,8 +314,8 @@ def update_task(message, task_data, status_buttons=None):
         bot.register_next_step_handler(msg, update_task, task_data,
                                        status_buttons)
         return
-    if message.text == '<< Back to Main Menu':
-        main_menu(message)
+    if message.text in COMMANDS:
+        command_checker(message)
         return
     bot.send_message(message.chat.id, 'Updating your task...')
     req = requests.patch(
@@ -261,8 +356,8 @@ def process_task_details_step(message, task_data, buttons):
         bot.register_next_step_handler(msg, process_task_details_step,
                                        task_data, buttons)
         return
-    if message.text == '<< Back to Main Menu':
-        main_menu(message)
+    if message.text in COMMANDS:
+        command_checker(message)
         return
     if message.text == 'Name':
         msg = bot.send_message(message.chat.id, 'OK. Send me a new name:')
@@ -296,8 +391,8 @@ def initiate_task_creation(message):
 
 
 def locate_dashboard_step(message, dashboards):
-    if message.text == '<< Back to Main Menu':
-        main_menu(message)
+    if message.text in COMMANDS:
+        command_checker(message)
         return
     d_id = [d.get('id') for d in dashboards if d.get('name') == message.text]
     if not d_id:
@@ -313,8 +408,8 @@ def locate_dashboard_step(message, dashboards):
 
 
 def process_task_name_step(message, task):
-    if message.text == '<< Back to Main Menu':
-        main_menu(message)
+    if message.text in COMMANDS:
+        command_checker(message)
         return
     task['task_name'] = message.text
     msg = bot.send_message(message.chat.id,
@@ -326,8 +421,8 @@ def process_task_name_step(message, task):
 
 
 def process_task_description_step(message, task):
-    if message.text == '<< Back to Main Menu':
-        main_menu(message)
+    if message.text in COMMANDS:
+        command_checker(message)
         return
     task['text'] = message.text
     bot.send_message(message.chat.id, 'OK. Creating your task...')
@@ -367,8 +462,8 @@ def initiate_adding_user_to_task(message):
 
 
 def locate_user_task_step(message, dashboards):
-    if message.text == '<< Back to Main Menu':
-        main_menu(message)
+    if message.text in COMMANDS:
+        command_checker(message)
         return
     d_id = [d.get('id') for d in dashboards if
             d.get('name') == message.text]
@@ -386,110 +481,120 @@ def locate_user_task_step(message, dashboards):
                            reply_markup=build_keyboard(*tasks,
                                                        '<< Back to Main Menu'))
 
-    bot.register_next_step_handler(msg, locate_task_users_step,
-                                   dashboard_tasks, d_id[0])
+    bot.register_next_step_handler(msg, locate_task_users_step, d_id[0],
+                                   dashboard_tasks)
 
 
-def locate_task_users_step(message, tasks, d_id):
-    if message.text == '<< Back to Main Menu':
-        main_menu(message)
+def locate_task_users_step(message, d_id, tasks=None, task=None):
+    if message.text in COMMANDS:
+        command_checker(message)
         return
-
-    task = [t for t in tasks if t.get('task_name') == message.text]
-    if not task:
-        msg = bot.send_message(message.chat.id,
-                               'Task does not exist. Choose a task from the '
-                               'list below:')
-        bot.register_next_step_handler(msg, locate_task_users_step, tasks, d_id)
-        return
-
+    if task is None:
+        task = [t for t in tasks if t.get('task_name') == message.text][0]
+        if not task:
+            msg = bot.send_message(message.chat.id,
+                                   'Task does not exist. Choose a task from '
+                                   'the list below:')
+            bot.register_next_step_handler(msg, locate_task_users_step, tasks,
+                                           d_id)
+            return
     dashboard_users = handlers.get_dashboard_users(message.chat.id, d_id)
-    users = [u.get('user_name') for u in dashboard_users]
+    users = [u.get('username') for u in dashboard_users]
     msg = bot.send_message(message.chat.id,
                            "OK. Send me a user to add to task:",
                            reply_markup=build_keyboard(*users,
                                                        '<< Back to Main Menu'))
-    bot.register_next_step_handler(msg, process_adding_user_step, task, users)
+    bot.register_next_step_handler(msg, process_adding_user_step, task,
+                                   dashboard_users)
 
 
 def process_adding_user_step(message, task, users):
-    print(message.text)
-    print(task)
-    print(users)
-
-@bot.message_handler(func=lambda x: x.text == 'Add User to Dashboard')
-def initiate_adding_user(message):
-    dashboards = handlers.get_user_dashboards_as_admin(message.chat.id)
-    user_dashboards = [d.get('name') for d in dashboards]
-    msg = bot.send_message(message.chat.id,
-                           "OK. Send me the dashboard to add new user to:",
-                           reply_markup=build_keyboard(*user_dashboards,
-                                                       '<< Back to Main Menu'))
-
-    bot.register_next_step_handler(msg, locate_user_dashboard_step, dashboards)
-
-
-def locate_user_dashboard_step(message, dashboards):
-    if message.text == '<< Back to Main Menu':
-        main_menu(message)
+    if message.text in COMMANDS:
+        command_checker(message)
         return
-    d_id = [d.get('id') for d in dashboards if
-            d.get('name') == message.text]
-    if not d_id:
+    user_id = [u.get('chat_id') for u in users if
+               u.get('username') == message.text]
+
+    if not user_id:
         msg = bot.send_message(message.chat.id,
-                               'Dashboard does not exist. Choose a dashboard '
-                               'from the list below:')
-        bot.register_next_step_handler(msg, locate_user_dashboard_step,
-                                       dashboards)
-        return
-    msg = bot.send_message(message.chat.id, "OK. Send me user's email:",
-                           reply_markup=build_keyboard('<< Back to Main Menu'))
-
-    bot.register_next_step_handler(msg, process_user_email_step, d_id[0])
-
-
-def process_user_email_step(message, dashboard):
-    if message.text == '<< Back to Main Menu':
-        main_menu(message)
-        return
-    pattern = re.compile(r'^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$')
-    result = re.match(pattern, message.text)
-    if not result:
-        msg = bot.send_message(
-            message.chat.id,
-            'Email seems to be invalid. Please type email in format '
-            'name@domen.com, no spaces allowed.')
-        bot.register_next_step_handler(msg, process_user_email_step, dashboard)
-        return
-
-    email = message.text
-    bot.send_message(message.chat.id,
-                     'Thank you, checking if user is registered...')
-    user = handlers.get_user_by_email(email)
-    sleep(1.0)
-    if user == 'Not found':
-        bot.send_message(
-            message.chat.id,
-            f"User with email {email} is not registered or email is wrong.",
-            reply_markup=build_keyboard('Add User to Dashboard',
-                                        '<< Back to Main Menu'))
+                               'User does not exist. Choose a task from the '
+                               'list below:')
+        bot.register_next_step_handler(msg, process_adding_user_step, task,
+                                       users)
         return
     bot.send_message(message.chat.id,
-                     'OK. User found. Adding user to dashboard...')
-    add_user_to_dashboard(message, user['chat_id'], dashboard)
+                     'OK. Adding user to task...')
+
+    add_user_to_task(message, user_id, task['dashboard_id'], task['id'])
 
 
-def add_user_to_dashboard(message, user_id, dashboard):
-    req = handlers.add_user_to_dashboard(message.chat.id, user_id, dashboard)
+def add_user_to_task(message, user_id, task_id, dashboard_id):
+    req = handlers.add_user_to_task(message.chat.id, user_id, task_id,
+                                    dashboard_id)
     sleep(1.0)
+
     if req == 201:
-        bot.send_message(message.chat.id, "User has been added",
+        bot.send_message(message.chat.id, "User has been added.",
                          reply_markup=build_keyboard('<< Back to Main Menu'))
         main_menu(message)
         return
     bot.send_message(message.chat.id,
-                     f"Adding user failed with status code: "
-                     f"{req.status_code}, message: {req.text}")
+                     f"Adding user failed with status code. Please try again")
+
+
+@bot.message_handler(func=lambda x: x.text == 'Post Comment')
+def initiate_posting_comment(message, comment_data):
+    if message.text in COMMANDS:
+        command_checker(message)
+        return
+
+    comment_data['title'] = message.text
+    msg = bot.send_message(message.chat.id,
+                           "OK. Send me the comment text:",
+                           reply_markup=build_keyboard('<< Back to Main Menu'))
+
+    bot.register_next_step_handler(msg, process_comment_text_step,
+                                   comment_data)
+
+
+def process_comment_text_step(message, comment_data):
+    if message.text in COMMANDS:
+        command_checker(message)
+        return
+
+    comment_data['text'] = message.text
+    comment_data['chat_id'] = message.chat.id
+    bot.send_message(message.chat.id, 'OK. Posting your comment...')
+
+    post_comment(message, comment_data)
+
+
+def post_comment(message, comment_data):
+    req = handlers.post_comment(comment_data)
+    sleep(1.0)
+    if req == 201:
+        bot.send_message(message.chat.id, "Comment has been posted.",
+                         reply_markup=build_keyboard(
+                             '<< Back to Main Menu'))
+        main_menu(message)
+        return
+    bot.send_message(message.chat.id,
+                     f"Posting comment was unsuccessful. Please try again.")
+
+
+@bot.message_handler(func=lambda x: x.text == 'My Comments')
+def get_user_comments(message):
+    # TODO add pagination
+    comments = handlers.get_user_comments(message.chat.id)
+    sleep(1.0)
+
+    for c in comments:
+        bot.send_message(message.chat.id,
+                         text=f"*Title*: {c.get('title')}\n"
+                              f"*Comment*: {c.get('comment')}\n"
+                              f"*Task*: {c.get('task')}\n"
+                              f"*Posted*: {c.get('created_at')}",
+                         parse_mode='Markdown')
 
 
 @bot.message_handler(
@@ -502,17 +607,18 @@ def main_menu(message):
                      " - Users\n"
                      " - Your account",
                      reply_markup=build_keyboard('Dashboards',
-                                                 'Tasks',
-                                                 'Users',
+                                                 'My Tasks',
+                                                 'My Comments',
                                                  'My Account'))
 
 
 @bot.callback_query_handler(func=lambda call: True)
 def process_callback_requests(call):
+    print(call.data)
     """Try changing message.chat.id to call.chat.id"""
     if call.data == 'main':
         main_menu(call.message)
-    elif call.data == 'Create Dashboard':
+    elif call.data == 'Create Dashboard' or 'create_dashboard' in call.data:
         initiate_dashboard_creation(call.message)
     elif 'update_dashboard' in call.data:
         d_board = call.data.split('_')
@@ -538,67 +644,94 @@ def process_callback_requests(call):
         d_board_hidden = [d.get('id') for d in dashboards]
 
         keyboard = build_inline_keyboard(d_board, d_board_hidden,
-                                         'dashboard_detailed')
+                                         'dashboard_main/dashboard_detailed')
 
-        keyboard.add(types.InlineKeyboardButton('<< Back to Main Menu',
-                                                callback_data='main'))
+        keyboard.add(
+            types.InlineKeyboardButton('Create Dashboard',
+                                       callback_data='create_dashboard'),
+            types.InlineKeyboardButton('<< Back to Main Menu',
+                                       callback_data='main'))
 
         bot.edit_message_text(text='Your dashboards:',
                               chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
                               reply_markup=keyboard)
     elif 'dashboard_detailed' in call.data:
-        d_board = call.data.split('_')
+        d_board_id = call.data.split('_')[-1]
+        d_board_name = call.data.split('_')[-2]
+        back_button = call.data.split('/')[0]
+
         keyboard = types.InlineKeyboardMarkup(row_width=2)
         keyboard.add(types.InlineKeyboardButton(
             'Dashboard Tasks',
-            callback_data=f'dashboard_tasks_{d_board[-1]}'),
+            callback_data=f'dashboard_detailed/dashboard_tasks_{d_board_id}'),
             types.InlineKeyboardButton(
                 'Dashboard Users',
-                callback_data=f'dashboard_users_{d_board[-1]}')
+                callback_data=f'dashboard_detailed/dashboard_users_{d_board_id}')
         )
         keyboard.add(types.InlineKeyboardButton(
             'Update Dashboard Name',
-            callback_data=f'update_dashboard_{d_board[-2]}_{d_board[-1]}'),
+            callback_data=f'update_dashboard_{d_board_name}_{d_board_id}'),
             types.InlineKeyboardButton(
                 'Delete Dashboard',
-                callback_data=f'delete_dashboard_{d_board[-2]}_{d_board[-1]}')
+                callback_data=f'delete_dashboard_{d_board_name}_{d_board_id}')
         )
         keyboard.add(types.InlineKeyboardButton(
-            '<< Back to Dashboard',
-            callback_data='dashboard_main'))
-        bot.edit_message_text(text=f'{d_board[-2]}\ntasks and users:',
+                '<< Back to Dashboards', callback_data=back_button))
+        bot.edit_message_text(text=f'{d_board_name}\ntasks and users:',
                               chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
                               reply_markup=keyboard)
     elif 'dashboard_users' in call.data:
-        d_board = call.data.split('_')
+        print(call.data)
+        d_board_id = call.data.split('_')[-1]
+        back_button = call.data.split('/')[0]
+
         users = handlers.get_dashboard_users(call.message.chat.id,
-                                             d_board[-1])
+                                             d_board_id)
         users_hidden = [u.get('chat_id') for u in users]
         users = [u.get('username') for u in users]
 
         keyboard = build_inline_keyboard(users, users_hidden,
                                          'user_detailed')
-        keyboard.add(types.InlineKeyboardButton(
-            '<< Back to Dashboard',
-            callback_data='dashboard_main'))
+        keyboard.add(
+            types.InlineKeyboardButton(
+                'Add User',
+                callback_data=f'add_user_dashboard_{d_board_id}'),
+            types.InlineKeyboardButton(
+                '<< Back to Dashboard', callback_data=back_button)
+        )
         bot.edit_message_text(text=f'Dashboard users:',
                               chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
                               reply_markup=keyboard)
+    elif 'add_user_dashboard' in call.data:
+        d_board_id = call.data[-1]
+
+        msg = bot.send_message(call.message.chat.id,
+                               "OK. Send me user's email:",
+                               reply_markup=build_keyboard(
+                                   '<< Back to Main Menu'))
+
+        bot.register_next_step_handler(msg, process_user_email_step,
+                                       d_board_id)
     elif 'dashboard_tasks' in call.data:
-        d_board = call.data.split('_')
+        d_board_id = call.data.split('_')[-1]
+        back_button = call.data.split('/')[0]
         tasks = handlers.get_dashboard_tasks(call.message.chat.id,
-                                             d_board[-1])
+                                             d_board_id)
         task = [t.get('task_name') for t in tasks]
         task_hidden = [t.get('id') for t in tasks]
 
         keyboard = build_inline_keyboard(task, task_hidden,
-                                         f'task_detailed_{d_board[-1]}')
-        keyboard.add(types.InlineKeyboardButton(
-            '<< Back to Dashboard',
-            callback_data='dashboard_main'))
+                                         f'task_detailed_{d_board_id}')
+        keyboard.add(
+            types.InlineKeyboardButton(
+                'Create Task',
+                callback_data=f'create_task_{d_board_id}'),
+            types.InlineKeyboardButton(
+                '<< Back to Dashboard',
+                callback_data=back_button))
 
         bot.edit_message_text(text=f'Dashboard tasks:',
                               chat_id=call.message.chat.id,
@@ -606,8 +739,8 @@ def process_callback_requests(call):
                               reply_markup=keyboard)
 
     elif 'user_detailed' in call.data:
-        user = call.data.split('_')
-        user = handlers.get_user(user[-1])
+        user = call.data.split('_')[-1]
+        user = handlers.get_user(user)
 
         keyboard = types.InlineKeyboardMarkup()
         keyboard.add(types.InlineKeyboardButton(
@@ -623,7 +756,6 @@ def process_callback_requests(call):
             reply_markup=keyboard,
             parse_mode='Markdown')
     elif 'task_detailed' in call.data:
-        print(call.data)
         d_board_id = call.data.split('_')[-3]
         task_id = call.data.split('_')[-1]
         task = handlers.get_task(call.message.chat.id, d_board_id, task_id)
@@ -661,20 +793,42 @@ def process_callback_requests(call):
             parse_mode='Markdown'
         )
     elif 'task_users' in call.data:
-        task_id = call.data.split('_')[-1]
+        data = call.data.split('_')
+        d_board_id = data[-2]
+        task_id = data[-1]
         users = handlers.get_task_users(task_id)
         users_hidden = [u.get('chat_id') for u in users]
         users = [u.get('username') for u in users]
 
         keyboard = build_inline_keyboard(users, users_hidden,
                                          'user_detailed')
-        keyboard.add(types.InlineKeyboardButton(
-            '<< Back to Dashboard',
-            callback_data='dashboard_main'))
+        keyboard.add(
+            types.InlineKeyboardButton(
+                'Add User',
+                callback_data=f'add_user_task_{d_board_id}_{task_id}'),
+            types.InlineKeyboardButton(
+                '<< Back to Dashboard',
+                callback_data='dashboard_main'))
         bot.edit_message_text(text=f'Task users:',
                               chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
                               reply_markup=keyboard)
+
+    elif 'add_user_task' in call.data:
+        task_id = call.data.split('_')[-1]
+        d_board_id = call.data.split('_')[-2]
+        task = handlers.get_task(call.message.chat.id, d_board_id, task_id)
+        locate_task_users_step(call.message, d_board_id, tasks=None, task=task)
+
+    elif 'create_task' in call.data:
+        d_board_id = call.data.split('_')[-1]
+        task = {'dashboard_id': d_board_id}
+        msg = bot.send_message(
+            call.message.chat.id,
+            'OK. Send me your task name:',
+            reply_markup=build_keyboard('<< Back to Main Menu'))
+
+        bot.register_next_step_handler(msg, process_task_name_step, task)
 
     elif 'update_task' in call.data:
         task_data = {'d_board_id': call.data.split('_')[-2],
@@ -701,16 +855,23 @@ def process_callback_requests(call):
                                        task_data, buttons)
 
     elif 'task_comments' in call.data:
-        task_id = call.data.split('_')[-1]
+        data = call.data.split('_')
+        task_id = data[-1]
+        d_board_id = data[-2]
         comments = handlers.get_task_all_comments(task_id)
         comments_hidden = [c.get('id') for c in comments]
         comments = [c.get('title') for c in comments]
 
         keyboard = build_inline_keyboard(comments, comments_hidden,
                                          'comments_detailed')
-        keyboard.add(types.InlineKeyboardButton(
-            '<< Back to Dashboard',
-            callback_data='dashboard_main'))
+        keyboard.row_width = 2
+        keyboard.add(
+            types.InlineKeyboardButton(
+                'Post Comment',
+                callback_data=f'post_comment_{d_board_id}_{task_id}'),
+            types.InlineKeyboardButton(
+                '<< Back to Dashboard',
+                callback_data='dashboard_main'))
         bot.edit_message_text(text=f'Task comments:',
                               chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
@@ -735,6 +896,17 @@ def process_callback_requests(call):
             message_id=call.message.message_id,
             reply_markup=keyboard,
             parse_mode='HTML')
+    elif 'post_comment' in call.data:
+        data = call.data.split('_')
+        comment_data = {'d_board_id': data[-2], 'task_id': data[-1]}
+
+        msg = bot.send_message(
+            call.message.chat.id,
+            'OK. Send me a comment title:',
+            reply_markup=build_keyboard('<< Back to Main Menu'))
+
+        bot.register_next_step_handler(msg, initiate_posting_comment,
+                                       comment_data)
 
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
@@ -742,320 +914,6 @@ def unknown(message):
     """Under construction. Should be below all the functions"""
     bot.send_message(message.chat.id,
                      "Sorry, I didn't understand that command.")
-    # -------------------------------------------------------------------------
-    # DASHBOARDS
-
-    #
-    # @bot.message_handler(commands=['dashboard'])
-    # def get_dashboard(message):
-    #     id_ = message.text.split(' ')[1]
-    #     req = requests.get(f'http://127.0.0.1:5000/dashboards/{id_}')
-    #     bot.send_message(message.chat.id, req.text)
-
-    # @bot.message_handler(commands=['dashboard_add_user'])
-    # def add_user_to_dashboard(message):
-    #     """Dashboard admin, dashboard, team member"""
-    #     d = message.text.split(' ')
-    #
-    #     if len(d) > 4:
-    #         bot.send_message(message,
-    #                          "Information is incorrect. Please enter user's"
-    #                          " and dashboard id")
-    #         return
-    #
-    #     req = requests.post(
-    #         f'http://127.0.0.1:5000/users/{d[1]}/dashboards/{d[2]}',
-    #         json={'team': f'{d[3]}'})
-    #
-    #     if req.status_code == 201:
-    #         bot.send_message(message.chat.id,
-    #                          f"User {d[3]} has been added to dashboard {d[2]}")
-    #         return
-    #     bot.send_message(message.chat.id,
-    #                      f"Adding user to the dashboard failed with status code: "
-    #                      f"{req.status_code}, message: {req.text}")
-
-    # @bot.message_handler(commands=['dashboard_list'])
-    # def get_dashboards(message):
-    #     d = message.text.split(' ')
-    #     req = requests.get(f'http://127.0.0.1:5000/dashboards/{d[1]}/{d[2]}')
-    #
-    #     if req.status_code == 200:
-    #         bot.send_message(message.chat.id, req.text)
-    #         return
-    #     bot.send_message(message.chat.id,
-    #                      f"Querying for {d[2]} has failed with status code: "
-    #                      f"{req.status_code}, message: {req.text}")
-
-    # @bot.message_handler(commands=['dashboard_update'])
-    # def update_dashboard(message):
-    #     """Needs updating. Only works if user's, dashboard id and dashboard name
-    #     were provided in proper order"""
-    #
-    #     d = message.text.split(' ')
-    #     req = requests.patch(
-    #         f'http://127.0.0.1:5000/users/{d[1]}/dashboards/{d[2]}',
-    #         json={'dashboard_name': d[3]})
-    #
-    #     if req.status_code == 204:
-    #         bot.send_message(message.chat.id,
-    #                          f"Dashboard {d[2]} has been updated")
-    #         return
-    #     bot.send_message(message.chat.id,
-    #                      f"Updating dashboard failed with status code: "
-    #                      f"{req.status_code}, message: {req.text}")
-
-    #
-    # @bot.message_handler(commands=['dashboard_delete'])
-    # def delete_dashboard(message):
-    #     d = message.text.split(' ')
-    #     req = requests.delete(
-    #         f'http://127.0.0.1:5000/users/{d[1]}/dashboards/{d[2]}')
-    #
-    #     if req.status_code == 200:
-    #         bot.send_message(message.chat.id,
-    #                          f"Dashboard {d[2]} has been deleted")
-    #         return
-    #     bot.send_message(message.chat.id,
-    #                      f"Deleting dashboard failed with "
-    #                      f"status code: {req.status_code}, message: {req.text}")
-
-    # @bot.message_handler(commands=['dashboard_tasks_status'])
-    # def dashboard_tasks_status(message):
-    #     d = message.text.split(' ')
-    #     req = requests.get(
-    #         f'http://127.0.0.1:5000/dashboards/{d[1]}/tasks?status={d[2]}')
-    #
-    #     if req.status_code == 200:
-    #         bot.send_message(message.chat.id, req.text)
-    #         return
-    #
-    #     bot.send_message(message.chat.id,
-    #                      f"Querying for {d[2]} has failed with status code: "
-    #                      f"{req.status_code}, message: {req.text}")
-
-    # Users--------------------------------------------------------
-    # @bot.message_handler(commands=['users'])
-    # def get_users(message):
-    #     req = requests.get('http://127.0.0.1:5000/users')
-    #     bot.send_message(message.chat.id, req.text)
-    #
-    #
-    # @bot.message_handler(commands=['user'])
-    # def get_user(message):
-    #     id_ = message.text.split(' ')[1]
-    #     req = requests.get(f'http://127.0.0.1:5000/users/{id_}')
-    #     bot.send_message(message.chat.id, req.text)
-    #
-    #
-    # @bot.message_handler(commands=['user_add'])
-    # def add_user(message):
-    #     user = message.text.split(' ')
-    #
-    #     if len(user) > 3:
-    #         bot.send_message(message,
-    #                          'Information is incorrect. Please enter username'
-    #                          ' and email')
-    #         return
-    #
-    #     req = requests.post('http://127.0.0.1:5000/users',
-    #                         json={'username': user[1], 'email': user[2]})
-    #
-    #     if req.status_code == 201:
-    #         bot.send_message(message.chat.id,
-    #                          f"User {user[1]} has been added to the DB")
-    #         return
-    #     bot.send_message(message.chat.id,
-    #                      f"Adding user failed with status code: {req.status_code},"
-    #                      f" message: {req.text}")
-    #
-    #
-    # @bot.message_handler(commands=['user_update'])
-    # def update_user(message):
-    #     """Needs updating. Only works if id, username and email were provided in
-    #     proper order"""
-    #
-    #     user = message.text.split(' ')
-    #     req = requests.patch(f'http://127.0.0.1:5000/users/{user[1]}',
-    #                          json={'username': user[2], 'email': user[3]})
-    #
-    #     if req.status_code == 204:
-    #         bot.send_message(message.chat.id,
-    #                          f"User {user[1]} has been updated")
-    #         return
-    #     bot.send_message(
-    #         message.chat.id,
-    #         f"Updating user failed with status code: {req.status_code}, "
-    #         f" message: {req.text}")
-    #
-    #
-    # @bot.message_handler(commands=['user_delete'])
-    # def delete_user(message):
-    #     id_ = message.text.split(' ')[1]
-    #     req = requests.delete(f'http://127.0.0.1:5000/users/{id_}')
-    #
-    #     if req.status_code == 200:
-    #         bot.send_message(message.chat.id,
-    #                          f"User {id_} has been deleted")
-    #         return
-    #     bot.send_message(message.chat.id,
-    #                      f"Deleting user failed with status code: {req.status_code},"
-    #                      f" message: {req.text}")
-    #
-    #
-    # @bot.message_handler(commands=['user_list'])
-    # def user_stats(message):
-    #     user = message.text.split(' ')
-    #     req = requests.get(
-    #         f'http://127.0.0.1:5000/users/{user[1]}/data?query={user[2]}')
-    #
-    #     if req.status_code == 200:
-    #         bot.send_message(message.chat.id, req.text)
-    #         return
-    #
-    #     bot.send_message(message.chat.id,
-    #                      f"Querying for {user[2]} has failed with status code: "
-    #                      f"{req.status_code}, message: {req.text}")
-
-    # -------------------------------------------------------------------------
-    # TASKS
-
-    # @bot.message_handler(commands=['task_list'])
-    # def get_task_users_comments(message):
-    #     task = message.text.split(' ')
-    #     req = requests.get(f'http://127.0.0.1:5000/tasks/{task[1]}/{task[2]}')
-    #
-    #     if req.status_code == 200:
-    #         bot.send_message(message.chat.id, req.text)
-    #         return
-    #
-    #     bot.send_message(message.chat.id,
-    #                      f"Querying for {task[2]} has failed with status code: "
-    #                      f"{req.status_code}, message: {req.text}")
-
-    # @bot.message_handler(commands=['task_add'])
-    # def add_task(message):
-    #     d = message.text.split(' ')
-    #     req = requests.post(
-    #         f'http://127.0.0.1:5000/users/{d[1]}/dashboards/{d[2]}/tasks',
-    #         json={'task_name': f'{d[3]}',
-    #               'text': f'{d[4]}'}
-    #     )
-    #
-    #     if req.status_code == 201:
-    #         bot.send_message(message.chat.id,
-    #                          f"Task {d[3]} has been created")
-    #         return
-    #     bot.send_message(message.chat.id,
-    #                      f"Creating task failed with status code: "
-    #                      f"{req.status_code}, message: {req.text}")
-
-    #
-    # @bot.message_handler(commands=['task'])
-    # def get_task(message):
-    #     t = message.text.split(' ')
-    #     req = requests.get(
-    #         f'http://127.0.0.1:5000/users/{t[1]}/dashboards/{t[2]}/tasks/{t[3]}')
-    #
-    #     if req.status_code == 200:
-    #         bot.send_message(message.chat.id, req.text)
-    #         return
-    #
-    #     bot.send_message(message.chat.id,
-    #                      f"Querying for {t[3]} has failed with status code: "
-    #                      f"{req.status_code}, message: {req.text}")
-    #
-    #
-    # @bot.message_handler(commands=['task_add_user'])
-    # def add_user_to_task(message):
-    #     """User, dashboard, task, team member"""
-    #     t = message.text.split(' ')
-    #
-    #     req = requests.post(
-    #         f'http://127.0.0.1:5000/users/{t[1]}/dashboards/{t[2]}/tasks/{t[3]}',
-    #         json={'team': f'{t[4]}'})
-    #
-    #     if req.status_code == 201:
-    #         bot.send_message(message.chat.id,
-    #                          f"User {t[4]} has been added to task {t[2]}")
-    #         return
-    #     bot.send_message(message.chat.id,
-    #                      f"Adding user to the task failed with status code: "
-    #                      f"{req.status_code}, message: {req.text}")
-
-    # @bot.message_handler(commands=['task_update'])
-    # def update_task(message):
-    #     """Needs updating. Only works if user's, task id and task name
-    #     were provided in proper order. Works for updating status only"""
-    #
-    #     t = message.text.split(' ')
-    #     req = requests.patch(
-    #         f'http://127.0.0.1:5000/users/{t[1]}/dashboards/{t[2]}/tasks/{t[3]}',
-    #         json={'status': f'{t[4]}'})
-    #
-    #     if req.status_code == 204:
-    #         bot.send_message(message.chat.id,
-    #                          f"Task {t[3]} has been updated")
-    #         return
-    #     bot.send_message(message.chat.id,
-    #                      f"Updating task failed with status code: "
-    #                      f"{req.status_code}, message: {req.text}")
-
-    """
-    Rest api does not have this method. Consider move tasks to archive
-
-@bot.message_handler(commands=['task_delete'])
-def delete_task(message):
-
-    t = message.text.split(' ')
-    req = requests.delete(
-        f'http://127.0.0.1:5000/users/{t[1]}/dashboards/{t[2]}/tasks/{t[3]}')
-
-    if req.status_code == 200:
-        bot.send_message(message.chat.id,
-                         f"Task {t[3]} has been deleted")
-        return
-    bot.send_message(message.chat.id,
-                     f"Deleting task failed with "
-                     f"status code: {req.status_code}, message: {req.text}")
-
-        """
-
-
-# -------------------------------------------------------------------------
-# COMMENTS
-#
-#
-# @bot.message_handler(commands=['comment_add'])
-# def add_comment(message):
-#     c = message.text.split(' ')
-#     req = requests.post(
-#         f'http://127.0.0.1:5000/users/{c[1]}/dashboards/{c[2]}/tasks/{c[3]}/comments',
-#         json={'text': f'{c[4]}'}
-#     )
-#
-#     if req.status_code == 200:
-#         bot.send_message(message.chat.id,
-#                          f"Comment has been added to task {c[3]}")
-#         return
-#     bot.send_message(message.chat.id,
-#                      f"Commenting task failed with status code: "
-#                      f"{req.status_code}, message: {req.text}")
-#
-#
-# @bot.message_handler(commands=['comments_list'])
-# def get_task_comments(message):
-#     c = message.text.split(' ')
-#     req = requests.get(
-#         f'http://127.0.0.1:5000/users/{c[1]}/dashboards/{c[2]}/tasks/{c[3]}/comments')
-#
-#     if req.status_code == 200:
-#         bot.send_message(message.chat.id, req.text)
-#         return
-#
-#     bot.send_message(message.chat.id,
-#                      f"Querying for comments to has failed with status code: "
-#                      f"{req.status_code}, message: {req.text}")
 
 
 if __name__ == '__main__':
