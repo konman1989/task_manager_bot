@@ -109,7 +109,7 @@ def get_dashboards(message):
     d_board_hidden = [d.get('id') for d in dashboards]
 
     keyboard = build_inline_keyboard(d_board, d_board_hidden,
-                                     'dashboard_main/dashboard_detailed')
+                                     'dashboard_detailed')
 
     keyboard.add(
         types.InlineKeyboardButton('Create Dashboard',
@@ -614,12 +614,14 @@ def main_menu(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def process_callback_requests(call):
-    print(call.data)
+
     """Try changing message.chat.id to call.chat.id"""
     if call.data == 'main':
         main_menu(call.message)
+
     elif call.data == 'Create Dashboard' or 'create_dashboard' in call.data:
         initiate_dashboard_creation(call.message)
+
     elif 'update_dashboard' in call.data:
         d_board = call.data.split('_')
         msg = bot.send_message(call.message.chat.id,
@@ -629,6 +631,7 @@ def process_callback_requests(call):
                                    '<< Back to Main Menu'))
         bot.register_next_step_handler(msg, update_dashboard,
                                        call.message.chat.id, d_board[-1])
+
     elif 'delete_dashboard' in call.data:
         d_board = call.data.split('_')
         msg = bot.send_message(call.message.chat.id,
@@ -644,7 +647,7 @@ def process_callback_requests(call):
         d_board_hidden = [d.get('id') for d in dashboards]
 
         keyboard = build_inline_keyboard(d_board, d_board_hidden,
-                                         'dashboard_main/dashboard_detailed')
+                                         'dashboard_detailed')
 
         keyboard.add(
             types.InlineKeyboardButton('Create Dashboard',
@@ -656,18 +659,18 @@ def process_callback_requests(call):
                               chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
                               reply_markup=keyboard)
+
     elif 'dashboard_detailed' in call.data:
         d_board_id = call.data.split('_')[-1]
         d_board_name = call.data.split('_')[-2]
-        back_button = call.data.split('/')[0]
 
         keyboard = types.InlineKeyboardMarkup(row_width=2)
         keyboard.add(types.InlineKeyboardButton(
             'Dashboard Tasks',
-            callback_data=f'dashboard_detailed/dashboard_tasks_{d_board_id}'),
+            callback_data=f'dashboard_tasks_{d_board_id}'),
             types.InlineKeyboardButton(
                 'Dashboard Users',
-                callback_data=f'dashboard_detailed/dashboard_users_{d_board_id}')
+                callback_data=f'dashboard_users_{d_board_id}')
         )
         keyboard.add(types.InlineKeyboardButton(
             'Update Dashboard Name',
@@ -677,15 +680,14 @@ def process_callback_requests(call):
                 callback_data=f'delete_dashboard_{d_board_name}_{d_board_id}')
         )
         keyboard.add(types.InlineKeyboardButton(
-                '<< Back to Dashboards', callback_data=back_button))
+                '<< Back to Dashboards', callback_data='dashboard_main'))
         bot.edit_message_text(text=f'{d_board_name}\ntasks and users:',
                               chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
                               reply_markup=keyboard)
+
     elif 'dashboard_users' in call.data:
-        print(call.data)
         d_board_id = call.data.split('_')[-1]
-        back_button = call.data.split('/')[0]
 
         users = handlers.get_dashboard_users(call.message.chat.id,
                                              d_board_id)
@@ -699,12 +701,13 @@ def process_callback_requests(call):
                 'Add User',
                 callback_data=f'add_user_dashboard_{d_board_id}'),
             types.InlineKeyboardButton(
-                '<< Back to Dashboard', callback_data=back_button)
+                '<< Back to Dashboards', callback_data='dashboard_main')
         )
         bot.edit_message_text(text=f'Dashboard users:',
                               chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
                               reply_markup=keyboard)
+
     elif 'add_user_dashboard' in call.data:
         d_board_id = call.data[-1]
 
@@ -715,9 +718,10 @@ def process_callback_requests(call):
 
         bot.register_next_step_handler(msg, process_user_email_step,
                                        d_board_id)
+
     elif 'dashboard_tasks' in call.data:
         d_board_id = call.data.split('_')[-1]
-        back_button = call.data.split('/')[0]
+
         tasks = handlers.get_dashboard_tasks(call.message.chat.id,
                                              d_board_id)
         task = [t.get('task_name') for t in tasks]
@@ -730,8 +734,8 @@ def process_callback_requests(call):
                 'Create Task',
                 callback_data=f'create_task_{d_board_id}'),
             types.InlineKeyboardButton(
-                '<< Back to Dashboard',
-                callback_data=back_button))
+                '<< Back to Dashboards',
+                callback_data='dashboard_main'))
 
         bot.edit_message_text(text=f'Dashboard tasks:',
                               chat_id=call.message.chat.id,
@@ -744,7 +748,7 @@ def process_callback_requests(call):
 
         keyboard = types.InlineKeyboardMarkup()
         keyboard.add(types.InlineKeyboardButton(
-            '<< Back to Dashboard',
+            '<< Back to Dashboards',
             callback_data='dashboard_main'))
 
         bot.edit_message_text(
@@ -755,9 +759,11 @@ def process_callback_requests(call):
             message_id=call.message.message_id,
             reply_markup=keyboard,
             parse_mode='Markdown')
+
     elif 'task_detailed' in call.data:
         d_board_id = call.data.split('_')[-3]
         task_id = call.data.split('_')[-1]
+
         task = handlers.get_task(call.message.chat.id, d_board_id, task_id)
 
         keyboard = types.InlineKeyboardMarkup(2)
@@ -796,7 +802,9 @@ def process_callback_requests(call):
         data = call.data.split('_')
         d_board_id = data[-2]
         task_id = data[-1]
+
         users = handlers.get_task_users(task_id)
+
         users_hidden = [u.get('chat_id') for u in users]
         users = [u.get('username') for u in users]
 
@@ -807,7 +815,7 @@ def process_callback_requests(call):
                 'Add User',
                 callback_data=f'add_user_task_{d_board_id}_{task_id}'),
             types.InlineKeyboardButton(
-                '<< Back to Dashboard',
+                '<< Back to Dashboards',
                 callback_data='dashboard_main'))
         bot.edit_message_text(text=f'Task users:',
                               chat_id=call.message.chat.id,
@@ -870,19 +878,20 @@ def process_callback_requests(call):
                 'Post Comment',
                 callback_data=f'post_comment_{d_board_id}_{task_id}'),
             types.InlineKeyboardButton(
-                '<< Back to Dashboard',
+                '<< Back to Dashboards',
                 callback_data='dashboard_main'))
         bot.edit_message_text(text=f'Task comments:',
                               chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
                               reply_markup=keyboard)
+
     elif 'comments_detailed' in call.data:
         comment_id = call.data.split('_')[-1]
         comment = handlers.get_comment(comment_id)
 
         keyboard = types.InlineKeyboardMarkup()
         keyboard.add(types.InlineKeyboardButton(
-            '<< Back to Dashboard',
+            '<< Back to Dashboards',
             callback_data='dashboard_main'))
 
         bot.edit_message_text(
@@ -896,6 +905,7 @@ def process_callback_requests(call):
             message_id=call.message.message_id,
             reply_markup=keyboard,
             parse_mode='HTML')
+
     elif 'post_comment' in call.data:
         data = call.data.split('_')
         comment_data = {'d_board_id': data[-2], 'task_id': data[-1]}
