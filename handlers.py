@@ -109,3 +109,18 @@ def get_user_comments(chat_id):
     req = requests.get(
         f'http://127.0.0.1:5000/users/{chat_id}/data?query=comments')
     return req.json()
+
+
+def update_user(chat_id, data):
+    req = requests.patch(
+        f'http://127.0.0.1:5000/users/{chat_id}',
+        json=data
+    )
+    return req.status_code
+
+
+def delete_user(chat_id):
+    req = requests.delete(
+        f'http://127.0.0.1:5000/users/{chat_id}',
+    )
+    return req.status_code
