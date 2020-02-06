@@ -21,9 +21,7 @@ def build_inline_keyboard(items, hidden_items, call_back_data):
     return keyboard
 
 
-def check_command(commands: list, message: str) -> bool:
-    if message in commands:
-        return True
+
 
 
 

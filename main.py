@@ -1,21 +1,19 @@
 # import logging
+import os
 import re
-import requests
 from time import sleep
 from telebot import TeleBot, types
 
 import handlers
-from utils import build_keyboard, build_inline_keyboard, check_command
+from utils import build_keyboard, build_inline_keyboard
 
-# logger = telebot.logger
-# telebot.logger.setLevel(logging.DEBUG)
 
-bot = TeleBot('926931469:AAH7VzaTMd-2wJ_AQClwyA9o42kXcC2r0Ck')
+BOT_KEY = os.getenv('TASK_MANAGER_BOT_TOKEN')
+bot = TeleBot(BOT_KEY)
 
 # TODO try/except clauses
 # TODO delete tasks, comments when dashboard deleted
 #
-
 
 EMOJI = {
     'dashboard': '\U0001F5C2',
@@ -28,7 +26,11 @@ EMOJI = {
     'delete': '\U0000274C',
     'yes': '\U00002705',
     'update': '\U0000270F',
-    'account': '\U0001F464'
+    'account': '\U0001F464',
+    'stats': '\U0001F4CA',
+    'TO DO': '\U0001F534',
+    'IN PROCESS': '\U0001F7E1',
+    'DONE': '\U0001F7E2'
 }
 
 COMMANDS = [
@@ -40,34 +42,37 @@ COMMANDS = [
 ]
 
 
-def command_checker(message):
-    """Check if user presses a menu button inside any next_step loop
-    and calls function the button corresponds to"""
-
-    commands = {
-        f'{EMOJI["main"]} Main Menu': main_menu,
-        f'{EMOJI["dashboard"]} Dashboards': get_dashboards,
-        f'{EMOJI["task"]} My Tasks': get_tasks,
-        f'{EMOJI["comment"]} My Comments': get_user_comments,
-        f'{EMOJI["back"]} Back to Main Menu': main_menu
-    }
-
-    commands[message.text](message)
-
-
 @bot.message_handler(commands=['start', 'help'])
 def send_options(message):
+    user = handlers.get_user(message.chat.id)
+    if user != 'Not found':
+        text = "This is a Task Manager Bot. You can create your own dashboards" \
+               " or join other user's ones. Inside dashboard you can create " \
+               "tasks, add users and comments."
+
+        bot.send_message(message.chat.id, text)
+        sleep(1.0)
+        main_menu(message)
+        return
+
     text = 'Welcome to Task Manager Bot. You can create a new dashboard or ' \
            'join existing one. Inside dashboard you can create tasks, ' \
            'add users and comments. To proceed you need to create an ' \
            'account below:'
 
     bot.send_message(message.chat.id, text,
-                     reply_markup=build_keyboard('Create Account'))
+                     reply_markup=build_keyboard(
+                         f'{EMOJI["add"]} Create Account'))
 
 
-@bot.message_handler(func=lambda x: x.text == 'Create Account')
+@bot.message_handler(func=lambda x: x.text == f'{EMOJI["add"]} Create Account')
 def create_account(message):
+    user = handlers.get_user(message.chat.id)
+    if user != 'Not found':
+        bot.send_message(message.chat.id, 'You already have an account.')
+        sleep(1.0)
+        main_menu(message)
+        return
     msg = bot.send_message(message.chat.id, 'OK. Send me your name:',
                            reply_markup=build_keyboard(
                                f'{EMOJI["back"]} Back to Main Menu'))
@@ -102,23 +107,22 @@ def process_email_step(message, user):
         bot.register_next_step_handler(msg, process_email_step, user)
         return
 
-    user['email'] = message.text
+    user['email'] = message.text.lower()
     bot.send_message(message.chat.id,
                      'Thank you, creating your account...')
     create_user(message, user)
 
 
 def create_user(message, user):
-    req = requests.post('http://127.0.0.1:5000/users',
-                        json=user)
+    req = handlers.create_user(user)
     sleep(1.0)
     if req.status_code == 201:
         bot.send_message(
             message.chat.id,
             "Your account has been created. You can create a new dashboard or "
-            "join existing one.",
-            reply_markup=build_keyboard(f'{EMOJI["add"]} Create Dashboard',
-                                        'Join Dashboard')
+            "join existing one. To join a dashboard, you need to pass the "
+            "dashboard admin your email and they will add you.",
+            reply_markup=build_keyboard(f'{EMOJI["add"]} Create Dashboard')
         )
         return
     bot.send_message(message.chat.id,
@@ -164,9 +168,12 @@ def update_user(message, data):
                 'name@domen.com, no spaces allowed.')
             bot.register_next_step_handler(msg, update_user, data)
             return
+        update_data = {data: message.text.lower()}
+    else:
+        update_data = {data: message.text}
 
-    update_data = {data: message.text}
     req = handlers.update_user(message.chat.id, update_data)
+
     if req == 204:
         bot.send_message(message.chat.id, f'Your account has been updated.')
         get_account_details(message)
@@ -182,7 +189,7 @@ def delete_user(message, chat_id):
         command_checker(message)
         return
     if message.text == f'{EMOJI["yes"]} Yes':
-        req = handlers.delete_dashboard(chat_id)
+        req = handlers.delete_user(chat_id)
         if req == 200:
             bot.send_message(message.chat.id, 'Account has been deleted.',
                              reply_markup=build_keyboard('Create Account'))
@@ -242,7 +249,7 @@ def update_dashboard(message, chat_id, d_id):
 
 
 def delete_dashboard(message, chat_id, d_id):
-    if message.text == 'Yes':
+    if message.text == f'{EMOJI["yes"]} Yes':
         req = handlers.delete_dashboard(chat_id, d_id)
         if req == 200:
             bot.send_message(message.chat.id, 'Dashboard has been deleted.')
@@ -287,15 +294,14 @@ def process_dashboard_name_step(message):
     create_dashboard(message, dashboard)
 
 
-def create_dashboard(message, d):
-    req = requests.post(
-        f'http://127.0.0.1:5000/users/{message.chat.id}/dashboards', json=d)
+def create_dashboard(message, data):
+    req = handlers.create_dashboard(message.chat.id, data)
 
     sleep(1.0)
-    if req.status_code == 201:
+    if req == 201:
         bot.send_message(
             message.chat.id,
-            f"Dashboard {d['dashboard_name']} has been created. You can "
+            f"Dashboard {data['dashboard_name']} has been created. You can "
             f"create a new task or add users to your dashboard now.",
             reply_markup=build_keyboard(
                 f'{EMOJI["add"]} Create Task',
@@ -309,7 +315,8 @@ def create_dashboard(message, d):
 
 
 @bot.message_handler(
-    func=lambda x: x.text == f'{EMOJI["add"]} Add User to Dashboard')
+    func=lambda x: x.text == f'{EMOJI["add"]} Add User to Dashboard'
+                   or x.text == f'{EMOJI["add"]} Add User')
 def initiate_adding_user(message):
     dashboards = handlers.get_user_dashboards_as_admin(message.chat.id)
     user_dashboards = [d.get('name') for d in dashboards]
@@ -432,12 +439,10 @@ def update_task(message, task_data, status_buttons=None):
         command_checker(message)
         return
     bot.send_message(message.chat.id, 'Updating your task...')
-    req = requests.patch(
-        f'http://127.0.0.1:5000/users/{message.chat.id}/'
-        f'dashboards/{task_data["d_board_id"]}/tasks/{task_data["task_id"]}',
-        json={task_data['update_instance']: message.text})
+
+    req = handlers.update_task(message.chat.id, task_data, message.text)
     sleep(1.0)
-    if req.status_code == 204:
+    if req == 204:
         bot.send_message(message.chat.id,
                          f"Task has been successfully updated")
         main_menu(message)
@@ -447,11 +452,11 @@ def update_task(message, task_data, status_buttons=None):
     main_menu(message)
 
 
-def delete_task(message, d_id):
-    if message.text == 'Yes':
-        req = handlers.delete_dashboard(message.chat.id, d_id)
+def delete_task(message, task_data):
+    if message.text == f'{EMOJI["yes"]} Yes':
+        req = handlers.delete_task(message.chat.id, task_data)
         if req == 200:
-            bot.send_message(message.chat.id, 'Dashboard has been deleted.')
+            bot.send_message(message.chat.id, 'Task has been deleted.')
             main_menu(message)
             return
         bot.send_message(message.chat.id,
@@ -477,11 +482,13 @@ def process_task_details_step(message, task_data, buttons):
         msg = bot.send_message(message.chat.id, 'OK. Send me a new name:')
         task_data['update_instance'] = 'task_name'
         bot.register_next_step_handler(msg, update_task, task_data)
+
     if message.text == 'Description':
         msg = bot.send_message(message.chat.id,
                                'OK. Send me a new description:')
         task_data['update_instance'] = 'text'
         bot.register_next_step_handler(msg, update_task, task_data)
+
     if message.text == 'Current Status':
         status_buttons = ['TO DO', 'IN PROCESS', 'DONE',
                           f'{EMOJI["back"]} Back to Main Menu']
@@ -549,12 +556,10 @@ def process_task_description_step(message, task):
 
 
 def create_task(message, task):
-    req = requests.post(
-        f"http://127.0.0.1:5000/users/{message.chat.id}/dashboards/"
-        f"{task['dashboard_id']}/tasks", json={'task_name': task['task_name'],
-                                               'text': task['text']})
+    req = handlers.create_task(message.chat.id, task)
     sleep(1.0)
-    if req.status_code == 201:
+
+    if req == 201:
         bot.send_message(
             message.chat.id,
             f"Task {task['task_name']} has been created. You can "
@@ -596,7 +601,7 @@ def locate_user_task_step(message, dashboards):
         bot.register_next_step_handler(msg, locate_user_task_step,
                                        dashboards)
         return
-    dashboard_tasks = handlers.get_dashboard_tasks(message.chat.id, d_id[0])
+    dashboard_tasks = handlers.get_dashboard_tasks(d_id[0])
     tasks = [t.get('task_name') for t in dashboard_tasks]
     msg = bot.send_message(message.chat.id,
                            "OK. Send me the task to add user to:",
@@ -622,7 +627,7 @@ def locate_task_users_step(message, d_id, tasks=None, task=None):
             bot.register_next_step_handler(msg, locate_task_users_step, tasks,
                                            d_id)
             return
-    dashboard_users = handlers.get_dashboard_users(message.chat.id, d_id)
+    dashboard_users = handlers.get_dashboard_users(d_id)
     users = [u.get('username') for u in dashboard_users]
     msg = bot.send_message(message.chat.id,
                            "OK. Send me a user to add to task:",
@@ -703,6 +708,7 @@ def process_comment_text_step(message, comment_data):
 def post_comment(message, comment_data):
     req = handlers.post_comment(comment_data)
     sleep(1.0)
+
     if req == 201:
         bot.send_message(message.chat.id, "Comment has been posted.",
                          reply_markup=build_keyboard(
@@ -749,7 +755,6 @@ def main_menu(message):
 
 @bot.callback_query_handler(func=lambda call: True)
 def process_callback_requests(call):
-    """Try changing message.chat.id to call.chat.id"""
     if call.data == 'main':
         main_menu(call.message)
 
@@ -773,7 +778,10 @@ def process_callback_requests(call):
         msg = bot.send_message(call.message.chat.id,
                                f'Are you sure you want to delete dashboard'
                                f' {d_board[-2]}?',
-                               reply_markup=build_keyboard('Yes', 'No'))
+                               reply_markup=build_keyboard(
+                                   f'{EMOJI["yes"]} Yes',
+                                   f'{EMOJI["delete"]} No')
+                               )
         bot.register_next_step_handler(msg, delete_dashboard,
                                        call.message.chat.id, d_board[-1])
 
@@ -816,19 +824,56 @@ def process_callback_requests(call):
                 f'{EMOJI["delete"]} Delete Dashboard',
                 callback_data=f'delete_dashboard_{d_board_name}_{d_board_id}')
         )
-        keyboard.add(types.InlineKeyboardButton(
-            f'{EMOJI["back"]} Back to Dashboards',
-            callback_data='dashboard_main'))
-        bot.edit_message_text(text=f'{d_board_name}\ntasks and users:',
+        keyboard.add(
+            types.InlineKeyboardButton(
+                f'{EMOJI["stats"]} Statistics',
+                callback_data=f'dashboard_stats_{d_board_name}_{d_board_id}'),
+            types.InlineKeyboardButton(
+                f'{EMOJI["back"]} Back to Dashboards',
+                callback_data='dashboard_main'))
+
+        bot.edit_message_text(text=f'*{d_board_name} details:*',
                               chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
-                              reply_markup=keyboard)
+                              reply_markup=keyboard,
+                              parse_mode='Markdown')
+
+    elif 'dashboard_stats' in call.data:
+        d_board_id = call.data.split('_')[-1]
+        d_board_name = call.data.split('_')[-2]
+        req = handlers.get_dashboard_stats(d_board_id)
+
+        if not req.get('status'):
+            bot.send_message(call.message.chat.id,
+                             f'Dashboard {d_board_name} has no tasks yet.')
+            return
+
+        to_do = [i for i in req.get('status') if i == 'TO DO']
+        in_process = [i for i in req.get('status') if i == 'IN PROCESS']
+        done = [i for i in req.get('status') if i == 'DONE']
+
+        done_len = len(done) / len(req.get('status'))
+        to_do_len = (len(to_do) + len(in_process)) / len(req.get('status'))
+        done_tasks_percent = round(done_len * 100)
+        done_len = round(done_len * 16)
+        to_do_len = round(to_do_len * 16)
+
+        progress_bar = "".join(['✓' for _ in range(0, done_len)]) + "".join(
+            ['×' for _ in range(0, to_do_len)])
+
+        text = f"*Dashboard {d_board_name} statistics:*\n\n" \
+               f"{EMOJI['TO DO']} *TO DO*: {len(to_do)} tasks\n" \
+               f"{EMOJI['IN PROCESS']} *IN PROCESS*: {len(in_process)} tasks\n" \
+               f"{EMOJI['DONE']} *DONE*: {len(done)} tasks\n\n" \
+               f"*Completed tasks:* {done_tasks_percent} %\n" \
+               f"{progress_bar}\n"
+
+        bot.send_message(call.message.chat.id, text, parse_mode='Markdown')
 
     elif 'dashboard_users' in call.data:
         d_board_id = call.data.split('_')[-1]
 
-        users = handlers.get_dashboard_users(call.message.chat.id,
-                                             d_board_id)
+        users = handlers.get_dashboard_users(d_board_id)
         users_hidden = [u.get('chat_id') for u in users]
         users = [u.get('username') for u in users]
 
@@ -842,10 +887,11 @@ def process_callback_requests(call):
                 f'{EMOJI["back"]} Back to Dashboards',
                 callback_data='dashboard_main')
         )
-        bot.edit_message_text(text=f'Dashboard users:',
+        bot.edit_message_text(text=f'*Dashboard users:*',
                               chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
-                              reply_markup=keyboard)
+                              reply_markup=keyboard,
+                              parse_mode='Markdown')
 
     elif 'add_user_dashboard' in call.data:
         d_board_id = call.data[-1]
@@ -862,8 +908,7 @@ def process_callback_requests(call):
     elif 'dashboard_tasks' in call.data:
         d_board_id = call.data.split('_')[-1]
 
-        tasks = handlers.get_dashboard_tasks(call.message.chat.id,
-                                             d_board_id)
+        tasks = handlers.get_dashboard_tasks(d_board_id)
         task = [t.get('task_name') for t in tasks]
         task_hidden = [t.get('id') for t in tasks]
 
@@ -877,10 +922,11 @@ def process_callback_requests(call):
                 f'{EMOJI["back"]} Back to Dashboards',
                 callback_data='dashboard_main'))
 
-        bot.edit_message_text(text=f'Dashboard tasks:',
+        bot.edit_message_text(text=f'*Dashboard tasks:*',
                               chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
-                              reply_markup=keyboard)
+                              reply_markup=keyboard,
+                              parse_mode='Markdown')
 
     elif 'user_detailed' in call.data:
         user = call.data.split('_')[-1]
@@ -938,6 +984,7 @@ def process_callback_requests(call):
             reply_markup=keyboard,
             parse_mode='Markdown'
         )
+
     elif 'task_users' in call.data:
         data = call.data.split('_')
         d_board_id = data[-2]
@@ -957,10 +1004,11 @@ def process_callback_requests(call):
             types.InlineKeyboardButton(
                 f'{EMOJI["back"]} Back to Dashboards',
                 callback_data='dashboard_main'))
-        bot.edit_message_text(text=f'Task users:',
+        bot.edit_message_text(text=f'*Task users:*',
                               chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
-                              reply_markup=keyboard)
+                              reply_markup=keyboard,
+                              parse_mode='Markdown')
 
     elif 'add_user_task' in call.data:
         task_id = call.data.split('_')[-1]
@@ -991,17 +1039,15 @@ def process_callback_requests(call):
                                        task_data, buttons)
 
     elif 'delete_task' in call.data:
-
-        """TODO ARCHIVE?"""
         task_data = {'d_board_id': call.data.split('_')[-2],
                      'task_id': call.data.split('_')[-1]}
-        buttons = ['Name', 'Current Status', 'Description',
-                   f'{EMOJI["back"]} Back to Main Menu']
         msg = bot.send_message(call.message.chat.id,
-                               'OK. Choose the details you want to update:',
-                               reply_markup=build_keyboard(*buttons))
-        bot.register_next_step_handler(msg, process_task_details_step,
-                                       task_data, buttons)
+                               'Are you sure you want to delete this task?',
+                               reply_markup=build_keyboard(
+                                   f'{EMOJI["yes"]} Yes',
+                                   f'{EMOJI["delete"]} No')
+                               )
+        bot.register_next_step_handler(msg, delete_task, task_data)
 
     elif 'task_comments' in call.data:
         data = call.data.split('_')
@@ -1021,10 +1067,11 @@ def process_callback_requests(call):
             types.InlineKeyboardButton(
                 f'{EMOJI["back"]} Back to Dashboards',
                 callback_data='dashboard_main'))
-        bot.edit_message_text(text=f'Task comments:',
+        bot.edit_message_text(text=f'*Task comments:*',
                               chat_id=call.message.chat.id,
                               message_id=call.message.message_id,
-                              reply_markup=keyboard)
+                              reply_markup=keyboard,
+                              parse_mode='Markdown')
 
     elif 'comments_detailed' in call.data:
         comment_id = call.data.split('_')[-1]
@@ -1080,6 +1127,21 @@ def process_callback_requests(call):
                                    f'{EMOJI["delete"]} No')
                                )
         bot.register_next_step_handler(msg, delete_user, chat_id)
+
+
+def command_checker(message):
+    """Checks if user presses a menu button inside any next_step loop
+    and calls function the button corresponds to"""
+
+    commands = {
+        f'{EMOJI["main"]} Main Menu': main_menu,
+        f'{EMOJI["dashboard"]} Dashboards': get_dashboards,
+        f'{EMOJI["task"]} My Tasks': get_tasks,
+        f'{EMOJI["comment"]} My Comments': get_user_comments,
+        f'{EMOJI["back"]} Back to Main Menu': main_menu
+    }
+
+    commands[message.text](message)
 
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
