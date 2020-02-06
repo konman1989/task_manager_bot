@@ -5,15 +5,15 @@ from time import sleep
 from telebot import TeleBot, types
 
 import handlers
+from emails import email_notification
 from utils import build_keyboard, build_inline_keyboard
-
 
 BOT_KEY = os.getenv('TASK_MANAGER_BOT_TOKEN')
 bot = TeleBot(BOT_KEY)
 
 # TODO try/except clauses
 # TODO delete tasks, comments when dashboard deleted
-#
+
 
 EMOJI = {
     'dashboard': '\U0001F5C2',
@@ -28,6 +28,7 @@ EMOJI = {
     'update': '\U0000270F',
     'account': '\U0001F464',
     'stats': '\U0001F4CA',
+    'email': '\U0001F4E7',
     'TO DO': '\U0001F534',
     'IN PROCESS': '\U0001F7E1',
     'DONE': '\U0001F7E2'
@@ -38,7 +39,8 @@ COMMANDS = [
     f'{EMOJI["dashboard"]} Dashboards',
     f'{EMOJI["task"]} My Tasks',
     f'{EMOJI["comment"]} My Comments',
-    f'{EMOJI["back"]} Back to Main Menu'
+    f'{EMOJI["back"]} Back to Main Menu',
+    f'{EMOJI["email"]} Send Email'
 ]
 
 
@@ -351,10 +353,29 @@ def locate_user_dashboard_step(message, dashboards):
     bot.register_next_step_handler(msg, process_user_email_step, d_id[0])
 
 
-def process_user_email_step(message, dashboard):
+def process_user_email_step(message, dashboard, email=None):
+    if message.text == f'{EMOJI["email"]} Send Email':
+        user = handlers.get_user(message.chat.id).get('username')
+        link = 'https://t.me/BestTaskManagerBot'
+        content = f"{user} was trying to add you to their dashboard in Best "\
+                  f"Task Manager Bot but noticed that you are not registered "\
+                  f"yet. If you still want to join you can click following " \
+                  f"link:\n\n{link}\n\n--\nBest Task Manager Bot"
+
+        email_notification(user, email, content)
+
+        bot.send_message(message.chat.id,
+                         f'OK. Sending an email to {email}...')
+        sleep(1.0)
+        bot.send_message(message.chat.id,
+                         'Email has been sent.')
+        main_menu(message)
+        return
+
     if message.text in COMMANDS:
         command_checker(message)
         return
+
     pattern = re.compile(r'^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$')
     result = re.match(pattern, message.text)
     if not result:
@@ -374,9 +395,15 @@ def process_user_email_step(message, dashboard):
         msg = bot.send_message(
             message.chat.id,
             f"User with email {email} is not registered or email is wrong. "
-            f"Please try again:",
-            reply_markup=build_keyboard(f'{EMOJI["back"]} Back to Main Menu'))
-        bot.register_next_step_handler(msg, process_user_email_step, dashboard)
+            f"If this is a correct email, we can send an email on your behalf "
+            f"to join Best Telegram Manager Bot. To confirm, press the button "
+            f"below:",
+            reply_markup=build_keyboard(
+                f'{EMOJI["email"]} Send Email',
+                f'{EMOJI["back"]} Back to Main Menu')
+        )
+        bot.register_next_step_handler(msg, process_user_email_step, dashboard,
+                                       email)
         return
     bot.send_message(message.chat.id,
                      'OK. User found. Adding user to dashboard...')
