@@ -12,8 +12,7 @@ BOT_KEY = os.getenv('TASK_MANAGER_BOT_TOKEN')
 bot = TeleBot(BOT_KEY)
 
 # TODO try/except clauses
-# TODO delete tasks, comments when dashboard deleted
-
+# TODO Work on logic upon creating a new user and adding their to dashboards
 
 EMOJI = {
     'dashboard': '\U0001F5C2',
@@ -118,7 +117,7 @@ def process_email_step(message, user):
 def create_user(message, user):
     req = handlers.create_user(user)
     sleep(1.0)
-    if req.status_code == 201:
+    if req == 201:
         bot.send_message(
             message.chat.id,
             "Your account has been created. You can create a new dashboard or "
@@ -128,8 +127,7 @@ def create_user(message, user):
         )
         return
     bot.send_message(message.chat.id,
-                     f"Adding user failed with status code: {req.status_code},"
-                     f" message: {req.text}")
+                     f"Creating account failed. Please try again.")
 
 
 @bot.message_handler(func=lambda x: x.text == f'{EMOJI["account"]} My Account')
@@ -146,7 +144,7 @@ def get_account_details(message):
             callback_data=f'update_user_email'),
         types.InlineKeyboardButton(
             f'{EMOJI["delete"]} Delete Account',
-            callback_data=f'delete_user_{user["chat_id"]}')
+            callback_data=f'delete_account_{user["chat_id"]}')
     )
     bot.send_message(message.chat.id,
                      text=f"*Here is your account details:*\n\n"
@@ -186,7 +184,7 @@ def update_user(message, data):
     get_account_details(message)
 
 
-def delete_user(message, chat_id):
+def delete_account(message, chat_id):
     if message.text in COMMANDS:
         command_checker(message)
         return
@@ -312,8 +310,7 @@ def create_dashboard(message, data):
                 f'{EMOJI["back"]} Back to Main Menu'))
         return
     bot.send_message(message.chat.id,
-                     f"Creating dashboard failed with status code: "
-                     f"{req.status_code}, message: {req.text}")
+                     f"Creating dashboard failed. Please try again.")
 
 
 @bot.message_handler(
@@ -357,8 +354,8 @@ def process_user_email_step(message, dashboard, email=None):
     if message.text == f'{EMOJI["email"]} Send Email':
         user = handlers.get_user(message.chat.id).get('username')
         link = 'https://t.me/BestTaskManagerBot'
-        content = f"{user} was trying to add you to their dashboard in Best "\
-                  f"Task Manager Bot but noticed that you are not registered "\
+        content = f"{user} was trying to add you to their dashboard in Best " \
+                  f"Task Manager Bot but noticed that you are not registered " \
                   f"yet. If you still want to join you can click following " \
                   f"link:\n\n{link}\n\n--\nBest Task Manager Bot"
 
@@ -418,10 +415,19 @@ def add_user_to_dashboard(message, user_id, dashboard):
                          reply_markup=build_keyboard(
                              f'{EMOJI["back"]} Back to Main Menu')
                          )
+        # sending notification to the added user
+        bot.send_message(user_id,
+                         "You have been added to a new dashboard",
+                         reply_markup=build_keyboard(
+                             f'{EMOJI["dashboard"]} Dashboards',
+                             f'{EMOJI["task"]} My Tasks',
+                             f'{EMOJI["comment"]} My Comments',
+                             f'{EMOJI["account"]} My Account')
+                         )
         main_menu(message)
         return
     bot.send_message(message.chat.id,
-                     f"Adding user failed with status code. Please try again")
+                     f"Adding user failed. Please try again")
 
 
 @bot.message_handler(func=lambda x: x.text == f'{EMOJI["task"]} My Tasks')
@@ -487,10 +493,9 @@ def delete_task(message, task_data):
             main_menu(message)
             return
         bot.send_message(message.chat.id,
-                         'Deleting dashboard was unsuccessful. '
+                         'Deleting task was unsuccessful. '
                          'Please try again')
 
-        main_menu(message)
     main_menu(message)
 
 
@@ -596,8 +601,7 @@ def create_task(message, task):
         main_menu(message)
         return
     bot.send_message(message.chat.id,
-                     f"Creating task failed with status code: "
-                     f"{req.status_code}, message: {req.text}")
+                     f"Creating task failed. Please try again.")
 
 
 @bot.message_handler(
@@ -789,29 +793,6 @@ def process_callback_requests(call):
             in call.data:
         initiate_dashboard_creation(call.message)
 
-    elif 'update_dashboard' in call.data:
-        d_board = call.data.split('_')
-        msg = bot.send_message(call.message.chat.id,
-                               f'OK. Give me a new name for dashboard'
-                               f' {d_board[-2]}:',
-                               reply_markup=build_keyboard(
-                                   f'{EMOJI["back"]} Back to Main Menu')
-                               )
-        bot.register_next_step_handler(msg, update_dashboard,
-                                       call.message.chat.id, d_board[-1])
-
-    elif 'delete_dashboard' in call.data:
-        d_board = call.data.split('_')
-        msg = bot.send_message(call.message.chat.id,
-                               f'Are you sure you want to delete dashboard'
-                               f' {d_board[-2]}?',
-                               reply_markup=build_keyboard(
-                                   f'{EMOJI["yes"]} Yes',
-                                   f'{EMOJI["delete"]} No')
-                               )
-        bot.register_next_step_handler(msg, delete_dashboard,
-                                       call.message.chat.id, d_board[-1])
-
     elif call.data == 'dashboard_main':
         dashboards = handlers.get_user_dashboards(call.message.chat.id)
         d_board = [d.get('name') for d in dashboards]
@@ -905,7 +886,7 @@ def process_callback_requests(call):
         users = [u.get('username') for u in users]
 
         keyboard = build_inline_keyboard(users, users_hidden,
-                                         'user_detailed')
+                                         f'user_detailed_{d_board_id}')
         keyboard.add(
             types.InlineKeyboardButton(
                 f'{EMOJI["add"]} Add User',
@@ -955,23 +936,94 @@ def process_callback_requests(call):
                               reply_markup=keyboard,
                               parse_mode='Markdown')
 
+    elif 'update_dashboard' in call.data:
+        d_board = call.data.split('_')
+        msg = bot.send_message(call.message.chat.id,
+                               f'OK. Give me a new name for dashboard'
+                               f' {d_board[-2]}:',
+                               reply_markup=build_keyboard(
+                                   f'{EMOJI["back"]} Back to Main Menu')
+                               )
+        bot.register_next_step_handler(msg, update_dashboard,
+                                       call.message.chat.id, d_board[-1])
+
+    elif 'delete_dashboard' in call.data:
+        d_board = call.data.split('_')
+        msg = bot.send_message(call.message.chat.id,
+                               f'Are you sure you want to delete dashboard'
+                               f' {d_board[-2]}?',
+                               reply_markup=build_keyboard(
+                                   f'{EMOJI["yes"]} Yes',
+                                   f'{EMOJI["delete"]} No')
+                               )
+        bot.register_next_step_handler(msg, delete_dashboard,
+                                       call.message.chat.id, d_board[-1])
+
     elif 'user_detailed' in call.data:
         user = call.data.split('_')[-1]
+        d_board_id = call.data.split('_')[-3]
+
         user = handlers.get_user(user)
+        user_id = user.get('chat_id')
 
         keyboard = types.InlineKeyboardMarkup()
-        keyboard.add(types.InlineKeyboardButton(
-            f'{EMOJI["back"]} Back to Dashboards',
-            callback_data='dashboard_main'))
+        d_board = handlers.get_dashboard(d_board_id)
+        d_board_name = d_board.get("name")
+        # adding a delete user button
+        if d_board.get('admin_id') != user_id \
+                and d_board.get('admin_id') == call.message.chat.id:
+            keyboard.add(
+                types.InlineKeyboardButton(
+                    f'{EMOJI["delete"]} Remove User',
+                    callback_data=f'remove_user_d_{d_board_name}_{d_board_id}_'
+                                  f'{user_id}'),
+                types.InlineKeyboardButton(
+                    f'{EMOJI["back"]} Back to Dashboards',
+                    callback_data='dashboard_main'))
 
-        bot.edit_message_text(
-            text=f"*Here is user details:*\n\n"
-                 f"*Name:* {user['username']}\n"
-                 f"*Email:* {user['email']}\n",
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            reply_markup=keyboard,
-            parse_mode='Markdown')
+            bot.edit_message_text(
+                text=f"*Here is user details:*\n\n"
+                     f"*Name:* {user['username']}\n"
+                     f"*Email:* {user['email']}\n",
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                reply_markup=keyboard,
+                parse_mode='Markdown')
+        else:
+            keyboard.add(
+                types.InlineKeyboardButton(
+                    f'{EMOJI["back"]} Back to Dashboards',
+                    callback_data='dashboard_main'))
+
+            bot.edit_message_text(
+                text=f"*Here is user details:*\n\n"
+                     f"*Name:* {user['username']}\n"
+                     f"*Email:* {user['email']}\n",
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                reply_markup=keyboard,
+                parse_mode='Markdown')
+
+    elif 'remove_user_d' in call.data:
+        user_id = call.data.split('_')[-1]
+        d_board = call.data.split('_')[-2]
+        d_board_name = call.data.split('_')[-3]
+
+        req = handlers.remove_user_from_dashboard(d_board, user_id)
+        bot.send_message(call.message.chat.id,
+                         "Removing user from dashboard...")
+        sleep(0.1)
+        if req == 200:
+            bot.send_message(call.message.chat.id,
+                             "User has been removed.")
+            get_dashboards(call.message)
+            # sending message to deleted user
+            bot.send_message(user_id, f"You have been removed from dashboard "
+                                      f"{d_board_name}.")
+            return
+        bot.send_message(call.message.chat.id,
+                         'Removing user failed. Please try again')
+        get_dashboards(call.message)
 
     elif 'task_detailed' in call.data:
         d_board_id = call.data.split('_')[-3]
@@ -1145,7 +1197,7 @@ def process_callback_requests(call):
                                    "OK. Send me a new email:")
             bot.register_next_step_handler(msg, update_user, data)
 
-    elif 'delete_user' in call.data:
+    elif 'delete_account' in call.data:
         chat_id = call.data.split('_')[-1]
         msg = bot.send_message(call.message.chat.id,
                                f'Are you sure you want to delete account?',
@@ -1153,7 +1205,7 @@ def process_callback_requests(call):
                                    f'{EMOJI["yes"]} Yes',
                                    f'{EMOJI["delete"]} No')
                                )
-        bot.register_next_step_handler(msg, delete_user, chat_id)
+        bot.register_next_step_handler(msg, delete_account, chat_id)
 
 
 def command_checker(message):

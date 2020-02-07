@@ -56,9 +56,9 @@ def create_dashboard(chat_id, data):
     return req.status_code
 
 
-def get_dashboard(chat_id, d_id):
+def get_dashboard(d_id):
     req = requests.get(
-        f'http://127.0.0.1:5000/users/{chat_id}/dashboards/{d_id}')
+        f'http://127.0.0.1:5000/dashboards/{d_id}')
     return req.json()
 
 
@@ -97,6 +97,12 @@ def add_user_to_dashboard(admin_id, user, d_board_id):
     req = requests.post(
         f'http://127.0.0.1:5000/users/{admin_id}/dashboards/{d_board_id}',
         json={"team": user})
+    return req.status_code
+
+
+def remove_user_from_dashboard(d_board_id, user_id):
+    req = requests.delete(
+        f'http://127.0.0.1:5000/dashboards/{d_board_id}/users/{user_id}')
     return req.status_code
 
 
