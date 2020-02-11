@@ -46,7 +46,9 @@ def send_options(message):
     if user != 'Not found':
         text = "This is a Task Manager Bot. You can create your own dashboards" \
                " or join other user's ones. Inside dashboard you can create " \
-               "tasks, add users and comments."
+               "tasks, add users and comments. Don't forget " \
+                "to subscribe to @BestTaskManagerNotifications_bot to receive " \
+                "notification about your tasks and comments!"
 
         bot.send_message(message.chat.id, text)
         sleep(1.0)
@@ -121,7 +123,9 @@ def create_user(message, user):
             message.chat.id,
             "Your account has been created. You can create a new dashboard or "
             "join existing one. To join a dashboard, you need to pass the "
-            "dashboard admin your email and they will add you.",
+            "dashboard admin your email and they will add you. Don't forget "
+            "to subscribe to @BestTaskManagerNotifications_bot to receive "
+            "notification about your tasks and comments!",
             reply_markup=build_keyboard(f'{EMOJI["add"]} Create Dashboard',
                                         f'{EMOJI["account"]} My Account')
         )
