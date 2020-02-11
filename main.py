@@ -1,7 +1,7 @@
 import os
 import re
 from time import sleep
-from telebot import TeleBot, types
+from telebot import TeleBot, types, logger
 
 import handlers
 from emails import email_notification
@@ -1270,5 +1270,10 @@ def unknown_command(message):
 
 
 if __name__ == '__main__':
-    bot.infinity_polling(none_stop=True, timeout=123)
+    while True:
+        try:
+            bot.polling(none_stop=True)
 
+        except Exception as e:
+            logger.error(e)
+            sleep(15)
