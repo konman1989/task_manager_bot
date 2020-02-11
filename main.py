@@ -1,4 +1,3 @@
-# import logging
 import os
 import re
 from time import sleep
@@ -11,8 +10,6 @@ from utils import build_keyboard, build_inline_keyboard
 BOT_KEY = os.getenv('TASK_MANAGER_BOT_TOKEN')
 bot = TeleBot(BOT_KEY)
 
-# TODO try/except clauses
-# TODO Work on logic upon creating a new user and adding their to dashboards
 
 EMOJI = {
     'dashboard': '\U0001F5C2',
@@ -84,7 +81,8 @@ def create_account(message):
 def process_name_step(message):
     if message.text == f'{EMOJI["back"]} Back to Main Menu':
         bot.send_message(message.chat.id, 'OK. Tell me when you are ready.',
-                         reply_markup=build_keyboard('Create Account'))
+                         reply_markup=build_keyboard(
+                             f'{EMOJI["add"]} Create Account'))
         return
     user = {'username': message.text, 'chat_id': message.chat.id, }
     msg = bot.send_message(message.chat.id, f'Thank you, {user["username"]}.'
@@ -96,7 +94,8 @@ def process_name_step(message):
 def process_email_step(message, user):
     if message.text == f'{EMOJI["back"]} Back to Main Menu':
         bot.send_message(message.chat.id, 'OK. Tell me when you are ready.',
-                         reply_markup=build_keyboard('Create Account'))
+                         reply_markup=build_keyboard(
+                             f'{EMOJI["add"]} Create Account'))
         return
     pattern = re.compile(r'^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$')
     result = re.match(pattern, message.text)
@@ -123,7 +122,8 @@ def create_user(message, user):
             "Your account has been created. You can create a new dashboard or "
             "join existing one. To join a dashboard, you need to pass the "
             "dashboard admin your email and they will add you.",
-            reply_markup=build_keyboard(f'{EMOJI["add"]} Create Dashboard')
+            reply_markup=build_keyboard(f'{EMOJI["add"]} Create Dashboard',
+                                        f'{EMOJI["account"]} My Account')
         )
         return
     bot.send_message(message.chat.id,
@@ -133,7 +133,8 @@ def create_user(message, user):
 @bot.message_handler(func=lambda x: x.text == f'{EMOJI["account"]} My Account')
 def get_account_details(message):
     user = handlers.get_user(message.chat.id)
-
+    if user_checker(message.chat.id, user):
+        return
     keyboard = types.InlineKeyboardMarkup()
     keyboard.add(
         types.InlineKeyboardButton(
@@ -192,7 +193,8 @@ def delete_account(message, chat_id):
         req = handlers.delete_user(chat_id)
         if req == 200:
             bot.send_message(message.chat.id, 'Account has been deleted.',
-                             reply_markup=build_keyboard('Create Account'))
+                             reply_markup=build_keyboard(
+                                 f'{EMOJI["add"]} Create Account'))
 
             return
         bot.send_message(message.chat.id,
@@ -209,6 +211,9 @@ def delete_account(message, chat_id):
     func=lambda x: x.text == f'{EMOJI["dashboard"]} Dashboards')
 def get_dashboards(message):
     dashboards = handlers.get_user_dashboards(message.chat.id)
+    if user_checker(message.chat.id, dashboards):
+        return
+
     d_board = [d.get('name') for d in dashboards]
     d_board_hidden = [d.get('id') for d in dashboards]
 
@@ -279,8 +284,7 @@ def process_dashboard_name_step(message):
     if message.text == f'{EMOJI["back"]} Back to Main Menu':
         bot.send_message(message.chat.id, 'OK. Tell me when you are ready.',
                          reply_markup=build_keyboard(
-                             f'{EMOJI["add"]} Create Dashboard',
-                             'Join Dashboard'))
+                             f'{EMOJI["add"]} Create Dashboard'))
         return
     if message.text in COMMANDS:
         command_checker(message)
@@ -379,7 +383,7 @@ def process_user_email_step(message, dashboard, email=None):
         msg = bot.send_message(
             message.chat.id,
             'Email seems to be invalid. Please type email in format '
-            'name@domen.com, no spaces allowed.')
+            'name@domen.com.')
         bot.register_next_step_handler(msg, process_user_email_step, dashboard)
         return
 
@@ -432,8 +436,10 @@ def add_user_to_dashboard(message, user_id, dashboard):
 
 @bot.message_handler(func=lambda x: x.text == f'{EMOJI["task"]} My Tasks')
 def get_tasks(message):
-    """TODO add dashboard id to task_detailed"""
     tasks = handlers.get_user_stats(message.chat.id, 'tasks')
+    if user_checker(message.chat.id, tasks):
+        return
+
     tasks_hidden = [
         '_'.join([str(t.get('dashboard_id')), str(t.get('task_name')),
                   str(t.get('id'))])
@@ -756,6 +762,9 @@ def post_comment(message, comment_data):
 def get_user_comments(message):
     # TODO add pagination
     comments = handlers.get_user_comments(message.chat.id)
+    if user_checker(message.chat.id, comments):
+        return
+
     sleep(1.0)
 
     for c in comments:
@@ -795,6 +804,10 @@ def process_callback_requests(call):
 
     elif call.data == 'dashboard_main':
         dashboards = handlers.get_user_dashboards(call.message.chat.id)
+
+        if user_checker(call.message.chat.id, dashboards):
+            return
+
         d_board = [d.get('name') for d in dashboards]
         d_board_hidden = [d.get('id') for d in dashboards]
 
@@ -851,6 +864,9 @@ def process_callback_requests(call):
         d_board_name = call.data.split('_')[-2]
         req = handlers.get_dashboard_stats(d_board_id)
 
+        if user_checker(call.message.chat.id, req):
+            return
+
         if not req.get('status'):
             bot.send_message(call.message.chat.id,
                              f'Dashboard {d_board_name} has no tasks yet.')
@@ -882,6 +898,10 @@ def process_callback_requests(call):
         d_board_id = call.data.split('_')[-1]
 
         users = handlers.get_dashboard_users(d_board_id)
+
+        if user_checker(call.message.chat.id, users):
+            return
+
         users_hidden = [u.get('chat_id') for u in users]
         users = [u.get('username') for u in users]
 
@@ -917,8 +937,12 @@ def process_callback_requests(call):
         d_board_id = call.data.split('_')[-1]
 
         tasks = handlers.get_dashboard_tasks(d_board_id)
-        task = [t.get('task_name') for t in tasks]
+
+        if user_checker(call.message.chat.id, tasks):
+            return
+
         task_hidden = [t.get('id') for t in tasks]
+        task = [t.get('task_name') for t in tasks]
 
         keyboard = build_inline_keyboard(task, task_hidden,
                                          f'task_detailed_{d_board_id}')
@@ -1017,7 +1041,7 @@ def process_callback_requests(call):
             bot.send_message(call.message.chat.id,
                              "User has been removed.")
             get_dashboards(call.message)
-            # sending message to deleted user
+            # sending message to the deleted user
             bot.send_message(user_id, f"You have been removed from dashboard "
                                       f"{d_board_name}.")
             return
@@ -1030,6 +1054,9 @@ def process_callback_requests(call):
         task_id = call.data.split('_')[-1]
 
         task = handlers.get_task(call.message.chat.id, d_board_id, task_id)
+
+        if user_checker(call.message.chat.id, task):
+            return
 
         keyboard = types.InlineKeyboardMarkup(2)
         keyboard.add(
@@ -1055,7 +1082,7 @@ def process_callback_requests(call):
                  f"*Name:* {task['task_name']}\n"
                  f"*Dashboard:* {task['dashboard']}\n"
                  f"*Admin:* {task['admin_name']}\n"
-                 f"*Created at:* {task['created at']}\n"
+                 f"*Created at:* {task['created_at']}\n"
                  f"*Current status:* {task['status']}\n"
                  f"*Description:* {task['text']}",
             chat_id=call.message.chat.id,
@@ -1208,6 +1235,19 @@ def process_callback_requests(call):
         bot.register_next_step_handler(msg, delete_account, chat_id)
 
 
+def user_checker(chat_id, object_):
+    """Check if user is registered in case account was deleted but access to
+    certain buttons remains"""
+
+    if isinstance(object_, str):
+        bot.send_message(chat_id,
+                         'Access restricted. Please create an account.',
+                         reply_markup=build_keyboard(
+                             f'{EMOJI["add"]} Create Account')
+                         )
+        return True
+
+
 def command_checker(message):
     """Checks if user presses a menu button inside any next_step loop
     and calls function the button corresponds to"""
@@ -1224,11 +1264,11 @@ def command_checker(message):
 
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
-def unknown(message):
-    """Under construction. Should be below all the functions"""
+def unknown_command(message):
     bot.send_message(message.chat.id,
                      "Sorry, I didn't understand that command.")
 
 
 if __name__ == '__main__':
-    bot.polling(none_stop=True)
+    bot.infinity_polling(none_stop=True, timeout=123)
+
