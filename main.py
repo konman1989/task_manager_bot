@@ -532,8 +532,8 @@ def process_task_details_step(message, task_data, buttons):
         bot.register_next_step_handler(msg, update_task, task_data)
 
     if message.text == 'Current Status':
-        status_buttons = ['TO DO', 'IN PROCESS', 'DONE',
-                          f'{EMOJI["back"]} Back to Main Menu']
+        status_buttons = ('TO DO', 'IN PROCESS', 'DONE',
+                          f'{EMOJI["back"]} Back to Main Menu')
         msg = bot.send_message(message.chat.id, 'OK. Send me a new status:',
                                reply_markup=build_keyboard(*status_buttons))
         task_data['update_instance'] = 'status'
@@ -1140,8 +1140,8 @@ def process_callback_requests(call):
     elif 'update_task' in call.data:
         task_data = {'d_board_id': call.data.split('_')[-2],
                      'task_id': call.data.split('_')[-1]}
-        buttons = ['Name', 'Current Status', 'Description',
-                   f'{EMOJI["back"]} Back to Main Menu']
+        buttons = ('Name', 'Current Status', 'Description',
+                   f'{EMOJI["back"]} Back to Main Menu')
         msg = bot.send_message(call.message.chat.id,
                                'OK. Choose the details you want to update:',
                                reply_markup=build_keyboard(*buttons))
@@ -1277,7 +1277,6 @@ if __name__ == '__main__':
     while True:
         try:
             bot.polling(none_stop=True)
-
         except Exception as e:
             logger.error(e)
             sleep(15)
